@@ -1,19 +1,3 @@
-"""
-Vector DB Builder & MVP Retrieval QA — Security Paper RAG
-=========================================================
-
-Workflow:
-  1. Load up to 10,000 chunks from output/rag_chunks_sample.jsonl
-  2. Embed with BAAI/bge-m3 (multilingual, 1024-dim)
-  3. Store in local ChromaDB (output/chroma_db)
-  4. Launch interactive terminal QA (top-3 retrieval)
-
-Usage:
-  python vector_db_builder.py                  # auto-detect: build or query
-  python vector_db_builder.py --rebuild        # force rebuild the DB
-  python vector_db_builder.py --query-only     # skip build, go straight to QA
-"""
-
 from __future__ import annotations
 
 import json
@@ -23,19 +7,11 @@ import textwrap
 from pathlib import Path
 from typing import Any
 
-# =============================================================================
-# Config
-# =============================================================================
-
 CHUNKS_FILE = Path("output/rag_chunks_sample.jsonl")
 CHROMA_DB_DIR = Path("output/chroma_db")
 COLLECTION_NAME = "security_papers"
 MAX_RECORDS = 10_000
 MODEL_NAME = "BAAI/bge-m3"
-
-# =============================================================================
-# Check dependencies
-# =============================================================================
 
 _DEP_ERRORS: list[str] = []
 
@@ -61,11 +37,6 @@ if _DEP_ERRORS:
         print(f"  - {err}")
     print("\nInstall with: pip install sentence-transformers chromadb tqdm")
     sys.exit(1)
-
-
-# =============================================================================
-# Utility: terminal formatting
-# =============================================================================
 
 C_RESET = "\033[0m"
 C_BOLD = "\033[1m"
@@ -107,11 +78,6 @@ def _print_chunk_result(idx: int, dist: float, metadata: dict, content: str) -> 
     wrapped = textwrap.fill(snippet, width=80, initial_indent="      ", subsequent_indent="      ")
     print(wrapped)
     print()
-
-
-# =============================================================================
-# Module A: Embedding & Ingestion
-# =============================================================================
 
 
 def _load_chunks(path: Path, max_records: int) -> list[dict[str, Any]]:
@@ -165,13 +131,11 @@ def build_vector_db(rebuild: bool = False) -> bool:
     print(f"  Model loaded. Dimension: {model.get_sentence_embedding_dimension()}")
     print(f"  Max sequence length: {model.max_seq_length}\n")
 
-    # ---- Load chunks ----
     records = _load_chunks(CHUNKS_FILE, MAX_RECORDS)
     if not records:
         print(f"{_maybe_color('[ERROR]', C_RED)} No records to embed.")
         return False
 
-    # ---- Prepare data for ChromaDB ----
     ids: list[str] = []
     documents: list[str] = []
     metadatas: list[dict[str, Any]] = []
@@ -179,7 +143,6 @@ def build_vector_db(rebuild: bool = False) -> bool:
     for rec in records:
         ids.append(rec["id"])
         documents.append(rec["content"])
-        # ChromaDB metadata values must be str, int, float, or bool
         meta_clean = {
             "paper_title": str(rec["metadata"].get("paper_title", ""))[:200],
             "source": str(rec["metadata"].get("source", "")),
@@ -188,8 +151,7 @@ def build_vector_db(rebuild: bool = False) -> bool:
             "tags": ", ".join(rec["metadata"].get("tags", [])),
         }
         metadatas.append(meta_clean)
-
-    # ---- Embed in batches ----
+      
     print("Generating embeddings (bge-m3, 1024-dim) ...")
     BATCH_SIZE = 64
     all_embeddings: list[list[float]] = []
@@ -216,7 +178,6 @@ def build_vector_db(rebuild: bool = False) -> bool:
         settings=ChromaSettings(anonymized_telemetry=False),
     )
 
-    # Drop + recreate if rebuilding
     try:
         client.delete_collection(COLLECTION_NAME)
         print("  Dropped existing collection.")
@@ -228,7 +189,6 @@ def build_vector_db(rebuild: bool = False) -> bool:
         metadata={"description": "Security paper RAG chunks — bge-m3 embeddings"},
     )
 
-    # Ingest in sub-batches (ChromaDB can handle large batches)
     print("  Ingesting into ChromaDB ...")
     INGEST_BATCH = 500
     for i in tqdm(range(0, len(ids), INGEST_BATCH),
@@ -246,12 +206,6 @@ def build_vector_db(rebuild: bool = False) -> bool:
     print(f"  Records:    {collection.count():,}")
     print(f"  Location:   {CHROMA_DB_DIR.resolve()}")
     return True
-
-
-# =============================================================================
-# Module B: Interactive Retrieval QA
-# =============================================================================
-
 
 def run_qa_loop() -> None:
     """Load existing ChromaDB and launch interactive QA loop."""
@@ -325,7 +279,6 @@ def run_qa_loop() -> None:
             include=["documents", "metadatas", "distances"],
         )
 
-        # Clear "Retrieving..." line
         print(" " * 40, end="\r")
 
         # Display results
@@ -368,19 +321,8 @@ def main() -> None:
                         help="Skip build, go directly to QA loop.")
     args = parser.parse_args()
 
-    # ---- Banner ----
-    print(_maybe_color(r"""
-   _____                     _            ____
-  / ___/___  _______  _______(_)___  _____/ __ \___  ____ _____ ____
-  \__ \/ _ \/ ___/ / / / ___/ / __ \/ ___/ /_/ / _ \/ __ '/ __ `/ _ \
- ___/ /  __/ /__/ /_/ / /  / / /_/ / /  / ____/  __/ /_/ / /_/ /  __/
-/____/\___/\___/\__,_/_/  /_/\__,_/_/  /_/    \___/\__,_/\__, /\___/
-                      Vector DB Builder & MVP QA         /____/
-""", C_CYAN))
-
     db_exists = CHROMA_DB_DIR.exists() and any(CHROMA_DB_DIR.iterdir())
 
-    # ---- Decide mode ----
     if args.query_only:
         build_ok = db_exists
     elif args.rebuild:
